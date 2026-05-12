@@ -3,37 +3,12 @@ import json
 import requests
 import csv
 import yfinance as yf
-from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1503446068191428659/KBg6fARNmmbG1vbVADQjQ5arHPYZxqGoS16iQY7psvCj-LKd0gYbv8SMBwTE9a_WUclk"
 
-def get_next_friday():
-    today = datetime.now()
-    days_until_friday = (4 - today.weekday()) % 7
-    if days_until_friday == 0:
-        days_until_friday = 7
-    next_friday = today + timedelta(days=days_until_friday)
-    return next_friday.strftime("%B %d, %Y")
-
-def suggest_option_contract(price, action):
-    price = float(price)
-
-    if action == "buy_call":
-        strike = round(price + 1)
-        contract_type = "CALL"
-    elif action == "buy_put":
-        strike = round(price - 1)
-        contract_type = "PUT"
-    else:
-        strike = round(price)
-        contract_type = "STOCK"
-
-    expiration = get_next_friday()
-    return strike, contract_type, expiration
-
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
 
@@ -56,8 +31,7 @@ def webhook():
     trend_confirmed = False
 
     suggested_strike = "N/A"
-    contract_type = "N/A"
-    expiration = "N/A"
+    contract_type = "CALL"
 
     try:
         stock = yf.Ticker(ticker)
@@ -68,17 +42,21 @@ def webhook():
             average_volume = int(hist["Volume"].mean())
             volume_confirmed = latest_volume > average_volume
 
-            hist["EMA200"] = hist["Close"].ewm(span=200).mean()
-            ema_200 = round(hist["EMA200"].iloc[-1], 2)
+            ema_200 = round(hist["Close"].ewm(span=200).mean().iloc[-1], 2)
 
             current_price = float(price)
 
-            if action == "buy_call":
-                trend_confirmed = current_price > ema_200
-            elif action == "buy_put":
-                trend_confirmed = current_price < ema_200
+            if current_price > ema_200:
+                trend_confirmed = True
 
-            suggested_strike, contract_type, expiration = suggest_option_contract(price, action)
+            rounded_price = round(current_price)
+
+            if action in ["buy", "buy_call"]:
+                contract_type = "CALL"
+                suggested_strike = rounded_price + 1
+            else:
+                contract_type = "PUT"
+                suggested_strike = rounded_price - 1
 
     except Exception as e:
         print("yfinance error:", e)
@@ -91,7 +69,7 @@ def webhook():
     if price != "N/A":
         score += 1
 
-    if action in ["buy_call", "buy_put"]:
+    if action in ["buy", "buy_call", "sell", "buy_put"]:
         score += 1
 
     if volume_confirmed:
@@ -116,8 +94,8 @@ def webhook():
 ⚡ Action: {action}
 📊 Strategy: {strategy}
 
-🧾 Suggested Contract: {ticker} {suggested_strike} {contract_type}
-📅 Expiration: {expiration}
+📑 Suggested Contract: {ticker} {suggested_strike} {contract_type}
+📅 Expiration: {alert_time}
 
 🛑 Stop Loss: {stop_loss}
 🎯 Take Profit: {take_profit}
@@ -127,7 +105,7 @@ def webhook():
 📊 Average Volume: {average_volume}
 ✅ Volume Confirmed: {volume_confirmed}
 
-📈 EMA 200: {ema_200}
+📉 EMA 200: {ema_200}
 ✅ Trend Confirmed: {trend_confirmed}
 
 🔥 Signal Score: {score}/5
@@ -138,6 +116,7 @@ def webhook():
 
     with open("alerts_log.csv", "a", newline="") as file:
         writer = csv.writer(file)
+
         writer.writerow([
             ticker,
             price,
@@ -153,26 +132,24 @@ def webhook():
             trend_confirmed,
             suggested_strike,
             contract_type,
-            expiration,
             score
         ])
 
     if score >= 4:
-    requests.post(DISCORD_WEBHOOK, json=message)
-else:
-    print(f"Weak signal blocked: {ticker} score {score}/5")
+        requests.post(DISCORD_WEBHOOK, json=message)
+    else:
+        print(f"Weak signal blocked: {ticker} score {score}/5")
 
     return {
         "status": "success",
         "score": score,
         "trend_confirmed": trend_confirmed,
-        "contract": f"{ticker} {suggested_strike} {contract_type}",
-        "expiration": expiration
-    }, 200
+        "contract": f"{ticker} {suggested_strike} {contract_type}"
+    }
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "Trading bot running."
+    return "Trading Alert Bot Running 🚀"
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5050)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5050)
