@@ -157,7 +157,10 @@ def webhook():
             score
         ])
 
+    if score >= 4:
     requests.post(DISCORD_WEBHOOK, json=message)
+else:
+    print(f"Weak signal blocked: {ticker} score {score}/5")
 
     return {
         "status": "success",
