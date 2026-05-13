@@ -157,7 +157,7 @@ def scanner_loop():
             scan_stock(ticker)
 
         print("Sleeping 300 seconds...")
-        time.sleep(300)
+            time.sleep(300)
 
 @app.route("/")
 def home():
