@@ -10,7 +10,7 @@ import threading
 
 app = Flask(__name__)
 
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1503446068191428659/KBg6fARNmmbG1vbVADQjQ5arHPYZxqGoS16iQY7psvCj-LKd0gYbv8SMBwTE9a_WUclk"
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504082995479314502/zDYRdyJ5nkmMdZhu3oixMuRLwBZZLcFQwjUHMy1Jdl5BCzNypjYA3pQi5e04AAUNH_U7"
 
 WATCHLIST = [
     "PLTR",
