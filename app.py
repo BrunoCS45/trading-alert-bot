@@ -1,9 +1,9 @@
-from flask import Flask, request
-import json
+from flask import Flask
 import requests
 import yfinance as yf
+import pandas as pd
 import time
-from threading import Thread
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -13,149 +13,162 @@ WATCHLIST = [
     "PLTR",
     "SOFI",
     "HOOD",
-    "UBER",
     "NIO",
-    "RIVN",
     "PYPL",
     "DIS",
     "BAC",
-    "INTC",
     "PFE",
-    "SHOP",
     "COIN",
     "AAPL",
     "QQQ",
     "SPY"
 ]
 
-def send_alert(message):
-    try:
-        requests.post(
-            DISCORD_WEBHOOK,
-            json={"content": message}
-        )
-    except Exception as e:
-        print("Discord error:", e)
+def send_discord_alert(message):
+    requests.post(DISCORD_WEBHOOK, json={"content": message})
+
+def get_next_friday():
+    today = datetime.now()
+    days_until_friday = (4 - today.weekday()) % 7
+
+    if days_until_friday == 0:
+        days_until_friday = 7
+
+    next_friday = today + timedelta(days=days_until_friday)
+    return next_friday.strftime("%B %d, %Y")
+
+def calculate_rsi(data, period=14):
+    delta = data.diff()
+
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+
+    rs = gain / loss
+
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]
 
 def scan_stock(ticker):
     try:
         stock = yf.Ticker(ticker)
 
-        hist = stock.history(
-            period="5d",
-            interval="5m"
-        )
+        hist = stock.history(period="5d", interval="5m")
 
-        if hist.empty or len(hist) < 50:
+        if hist.empty or len(hist) < 200:
             print(f"{ticker}: not enough data")
             return
 
         close = hist["Close"]
 
-        ema_9 = close.ewm(span=9).mean().iloc[-1]
-        ema_20 = close.ewm(span=20).mean().iloc[-1]
-        ema_200 = close.ewm(span=200).mean().iloc[-1]
-
         current_price = close.iloc[-1]
 
-        volume = hist["Volume"].iloc[-1]
-        avg_volume = hist["Volume"].tail(20).mean()
+        ema9 = close.ewm(span=9).mean().iloc[-1]
+        ema20 = close.ewm(span=20).mean().iloc[-1]
+        ema200 = close.ewm(span=200).mean().iloc[-1]
+
+        latest_volume = int(hist["Volume"].iloc[-1])
+        average_volume = int(hist["Volume"].mean())
+
+        volume_confirmed = latest_volume > average_volume
+
+        rsi = calculate_rsi(close)
 
         score = 0
 
-        if current_price > ema_9:
+        # Trend confirmation
+        bullish = ema9 > ema20 > ema200
+        bearish = ema9 < ema20 < ema200
+
+        if bullish or bearish:
             score += 1
 
-        if ema_9 > ema_20:
+        # Volume confirmation
+        if volume_confirmed:
             score += 1
 
-        if volume > avg_volume:
+        # RSI confirmation
+        if bullish and rsi > 60:
             score += 1
 
-        if current_price > ema_200:
+        if bearish and rsi < 40:
             score += 1
 
-        if (
-            current_price > ema_9
-            and ema_9 > ema_20
-            and current_price > ema_200
-        ):
+        # Momentum confirmation
+        momentum = abs(close.iloc[-1] - close.iloc[-5])
+
+        if momentum > (current_price * 0.003):
             score += 1
 
-        if score >= 4:
+        # ONLY SEND STRONG/FIRE ALERTS
+        if score < 4:
+            print(f"Weak signal blocked: {ticker} ({score}/5)")
+            return
 
-            strength = "🔥 STRONG"
+        action = "CALL" if bullish else "PUT"
 
-            if score == 5:
-                strength = "🚀 FIRE"
+        strike = round(current_price)
 
-            alert = f"""
-{strength} STOCK ALERT
+        expiration = get_next_friday()
 
-Ticker: {ticker}
-Price: ${round(current_price, 2)}
+        message = f"""
+🚨 OPTIONS TRADE ALERT 🚨
 
-EMA 9: {round(ema_9, 2)}
-EMA 20: {round(ema_20, 2)}
-EMA 200: {round(ema_200, 2)}
+📈 Ticker: {ticker}
+💰 Stock Price: ${current_price:.2f}
 
-Volume: {int(volume)}
-Avg Volume: {int(avg_volume)}
+⚡ PLAY:
+{"BUY CALL" if action == "CALL" else "BUY PUT"}
 
-Signal Score: {score}/5
+📄 Suggested Contract:
+{ticker} {strike}{'C' if action == 'CALL' else 'P'}
 
-Possible Momentum Play 📈
+📅 Expiration:
+{expiration}
+
+📊 EMA 9: {ema9:.2f}
+📊 EMA 20: {ema20:.2f}
+📊 EMA 200: {ema200:.2f}
+
+📦 Latest Volume: {latest_volume}
+📈 Average Volume: {average_volume}
+
+✅ Volume Confirmed: {volume_confirmed}
+🔥 RSI Momentum: {rsi:.2f}
+
+⭐ Signal Strength: {score}/5
+
+{"🚀 Strong Bullish Momentum Confirmed" if action == "CALL" else "🩸 Strong Bearish Momentum Confirmed"}
 """
 
-            send_alert(alert)
+        send_discord_alert(message)
 
-            print(
-                f"{strength} alert sent for {ticker}"
-            )
-
-        else:
-            print(
-                f"Weak signal blocked: "
-                f"{ticker} ({score}/5)"
-            )
+        print(f"🔥 Strong alert sent for {ticker} ({score}/5)")
 
     except Exception as e:
         print(f"Error scanning {ticker}: {e}")
 
-def scanner_loop():
-    while True:
-
-        print("Scanning market...")
-
-        for ticker in WATCHLIST:
-            scan_stock(ticker)
-
-        print("Sleeping 300 seconds...")
-
-        time.sleep(300)
-
 @app.route("/")
 def home():
-    return "Scanner running."
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json
-
-    print("Webhook received:")
-    print(json.dumps(data, indent=2))
-
-    return {"status": "ok"}
-
-scanner_thread = Thread(
-    target=scanner_loop
-)
-
-scanner_thread.daemon = True
-scanner_thread.start()
+    return "Scanner Running"
 
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=5000
-    )
+
+    while True:
+
+        now = datetime.now()
+
+        market_open = now.replace(hour=9, minute=30, second=0)
+        market_close = now.replace(hour=16, minute=0, second=0)
+
+        if now.weekday() < 5 and market_open <= now <= market_close:
+
+            print("Scanning market...")
+
+            for ticker in WATCHLIST:
+                scan_stock(ticker)
+
+        else:
+            print("Market closed - waiting...")
+
+        print("Sleeping 300 seconds...")
+        time.sleep(300)
