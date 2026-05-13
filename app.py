@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 import time
 from datetime import datetime, timedelta
+from threading import Thread
 
 app = Flask(__name__)
 
@@ -148,27 +149,20 @@ def scan_stock(ticker):
         print(f"Error scanning {ticker}: {e}")
 
 @app.route("/")
-def home():
-    return "Scanner Running"
-
-if __name__ == "__main__":
-
+def scanner_loop():
     while True:
+        print("Scanning market...")
 
-        now = datetime.now()
-
-        market_open = now.replace(hour=9, minute=30, second=0)
-        market_close = now.replace(hour=16, minute=0, second=0)
-
-        if now.weekday() < 5 and market_open <= now <= market_close:
-
-            print("Scanning market...")
-
-            for ticker in WATCHLIST:
-                scan_stock(ticker)
-
-        else:
-            print("Market closed - waiting...")
+        for ticker in WATCHLIST:
+            scan_stock(ticker)
 
         print("Sleeping 300 seconds...")
         time.sleep(300)
+
+@app.route("/")
+def home():
+    return "Scanner Running"
+
+scanner_thread = Thread(target=scanner_loop)
+scanner_thread.daemon = True
+scanner_thread.start()
