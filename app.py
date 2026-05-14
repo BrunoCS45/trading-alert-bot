@@ -180,7 +180,7 @@ def home():
 
 scanner_thread = Thread(target=scanner_loop)
 scanner_thread.daemon = True
-scanner_thread.start()from flask import Flask
+scanner_thread.start()
 import requests
 import yfinance as yf
 import pandas as pd
