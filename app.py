@@ -343,20 +343,12 @@ def scan_stock(ticker):
         print(f"Error scanning {ticker}: {e}")
 
 @app.route("/")
-def scanner_loop():
-    while True:
-        print("Scanning market...")
-
-        for ticker in WATCHLIST:
-            scan_stock(ticker)
-
-        print("Sleeping 300 seconds...")
-        time.sleep(300)
-
-@app.route("/")
 def home():
     return "Scanner Running"
 
 scanner_thread = Thread(target=scanner_loop)
 scanner_thread.daemon = True
 scanner_thread.start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5050)
