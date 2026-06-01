@@ -22,7 +22,7 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504082995479314502/zDYRdyJ5
 WATCHLIST = ["BAC", "F", "SOFI", "HOOD"]
 
 # ---- Tunable settings ----
-SCAN_INTERVAL_SECONDS = 7200     # check every 2 hours
+SCAN_INTERVAL_SECONDS = 1800     # check every 30 mins
 RSI_BLOCK_HIGH = 72
 RSI_BLOCK_LOW = 28
 PULLBACK_LOOKBACK = 5
