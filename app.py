@@ -1,8 +1,25 @@
 """
-SWING SCANNER (daily timeframe) — Render-ready
-Pullback-in-trend setup. Holds for days. Scans every 2 hours.
-NOTE: BAC & F passed full robustness testing; SOFI & HOOD did NOT
-(edge is recent-only). Verify those two yourself before trading.
+SWING SCANNER  (daily timeframe — built for people with a day job)
+
+Holds positions for DAYS, not minutes. Scans a few times a day (default every
+2 hours), so you can check your phone occasionally instead of babysitting charts.
+
+THE SETUP IT LOOKS FOR (pullback-in-trend):
+  1. Established uptrend (CALL):  EMA50 > EMA200  AND  price above EMA50
+     (or downtrend for PUT: EMA50 < EMA200 and price below EMA50)
+  2. A pullback just happened:    price recently dipped toward the EMA20
+  3. A reclaim/bounce:            today's candle closes back in the trend
+                                  direction (bullish bar in an uptrend)
+  4. Not overextended:            RSI not already extreme
+  5. Volume not dead:             today's volume >= its recent average
+
+When it fires, it suggests a CALL/PUT a few WEEKS out (slow theta) and a
+WIDE stop / target sized for a multi-day swing, NOT a scalp.
+
+IMPORTANT: place your stop AND target as a bracket/OCO order at your broker
+when you enter, so the trade exits on its own while you're at work.
+
+>>> This is unvalidated until you run swing_backtest.py. Do that first. <<<
 """
 
 from flask import Flask
@@ -21,15 +38,17 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504082995479314502/zDYRdyJ5
 
 WATCHLIST = ["BAC", "F", "SOFI", "HOOD"]
 
-# ---- Tunable settings ----
-SCAN_INTERVAL_SECONDS = 1800     # check every 30 mins
-RSI_BLOCK_HIGH = 72
-RSI_BLOCK_LOW = 28
-PULLBACK_LOOKBACK = 5
-PULLBACK_TOUCH = 0.01
-STOP_PCT = 0.04
-TARGET_PCT = 0.08
-OPTION_WEEKS_OUT = 3
+# ---- Tunable settings (GUESSES until swing_backtest.py proves them) ----
+SCAN_INTERVAL_SECONDS = 3600     # check every hour (daily strategy; avoid rate limits)
+TICKER_DELAY_SECONDS = 4         # pause between tickers so Yahoo doesn't throttle
+FETCH_RETRIES = 3                # retry a ticker if rate-limited
+RSI_BLOCK_HIGH = 72              # don't buy already-overbought
+RSI_BLOCK_LOW = 28              # don't short already-oversold
+PULLBACK_LOOKBACK = 5           # bars to look back for the dip toward EMA20
+PULLBACK_TOUCH = 0.01           # "near EMA20" = within 1%
+STOP_PCT = 0.04                 # 4% stop (room for a swing to breathe)
+TARGET_PCT = 0.08               # 8% target
+OPTION_WEEKS_OUT = 3            # suggest expiration ~3 weeks out (slow theta)
 
 sent_alerts = set()
 _alerts_date = None
@@ -64,6 +83,7 @@ def send_discord_alert(message):
 def get_expiration(weeks_out=OPTION_WEEKS_OUT):
     today = datetime.now(ZoneInfo("America/New_York"))
     target = today + timedelta(weeks=weeks_out)
+    # roll forward to that week's Friday
     days_to_fri = (4 - target.weekday()) % 7
     exp = target + timedelta(days=days_to_fri)
     return exp.strftime("%B %d, %Y")
@@ -79,10 +99,25 @@ def wilder_rsi(close, period=14):
     return (100 - 100/(1+rs)).iloc[-1]
 
 
+def fetch_history(ticker):
+    """Fetch daily history with retry + backoff so a rate-limit doesn't skip the ticker."""
+    for attempt in range(FETCH_RETRIES):
+        try:
+            hist = yf.Ticker(ticker).history(period="2y", interval="1d")
+            if not hist.empty:
+                return hist
+        except Exception as e:
+            msg = str(e)
+            wait = 5 * (attempt + 1)
+            print(f"{ticker}: fetch error ({msg[:40]}); retrying in {wait}s")
+            time.sleep(wait)
+    return None
+
+
 def scan_stock(ticker):
     try:
-        hist = yf.Ticker(ticker).history(period="2y", interval="1d")
-        if hist.empty or len(hist) < 210:
+        hist = fetch_history(ticker)
+        if hist is None or hist.empty or len(hist) < 210:
             print(f"{ticker}: not enough daily data")
             return
 
@@ -101,6 +136,7 @@ def scan_stock(ticker):
             print(f"{ticker}: no clear trend")
             return
 
+        # pullback toward EMA20 in the last few bars
         recent_low = hist["Low"].iloc[-PULLBACK_LOOKBACK:]
         recent_high = hist["High"].iloc[-PULLBACK_LOOKBACK:]
         near20_up = (recent_low.min() <= ema20.iloc[-1] * (1 + PULLBACK_TOUCH))
@@ -144,7 +180,8 @@ Trend: EMA50 {'>' if action=='CALL' else '<'} EMA200, pullback-to-EMA20 reclaim
 RSI: {rsi:.1f}   Volume vs 20d avg: {vol/avg_vol:.2f}x
 
 >> Place stop + target as a BRACKET/OCO order at your broker so it exits
-   itself while you're at work. Hold days, not minutes.
+   itself while you're at work. Hold days, not minutes. Theta is slow on
+   {OPTION_WEEKS_OUT}-week options, but it still adds up — don't marry the trade.
 """
         send_discord_alert(message)
         print(f"Swing alert: {ticker} {action}")
@@ -158,6 +195,7 @@ def scanner_loop():
             print("Scanning (swing / daily)...")
             for t in WATCHLIST:
                 scan_stock(t)
+                time.sleep(TICKER_DELAY_SECONDS)  # be gentle on Yahoo
         else:
             print("Market closed - waiting...")
         print(f"Sleeping {SCAN_INTERVAL_SECONDS}s...")
@@ -174,5 +212,5 @@ scanner_thread.daemon = True
 scanner_thread.start()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5051))
+    port = int(os.environ.get("PORT", 5051))  # Render provides PORT
     app.run(host="0.0.0.0", port=port)
