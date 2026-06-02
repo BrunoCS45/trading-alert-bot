@@ -33,7 +33,6 @@ from threading import Thread
 import pandas as pd
 
 app = Flask(__name__)
-scanner_started = False
 
 DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504082995479314502/zDYRdyJ5nkmMdZhu3oixMuRLwBZZLcFQwjUHMy1Jdl5BCzNypjYA3pQi5e04AAUNH_U7"
 
@@ -208,16 +207,14 @@ def home():
     return "Swing Scanner Running"
 
 
-@app.before_request
 def start_scanner():
-    global scanner_started
+    scanner_thread = Thread(target=scanner_loop)
+    scanner_thread.daemon = True
+    scanner_thread.start()
+    print("Scanner thread started.")
 
-    if not scanner_started:
-        scanner_started = True
-        scanner_thread = Thread(target=scanner_loop)
-        scanner_thread.daemon = True
-        scanner_thread.start()
-        print("Scanner thread started.")
+
+start_scanner()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5051))  # Render provides PORT
