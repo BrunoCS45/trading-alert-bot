@@ -1,27 +1,3 @@
-"""
-SWING SCANNER  (daily timeframe — built for people with a day job)
-
-Holds positions for DAYS, not minutes. Scans a few times a day (default every
-2 hours), so you can check your phone occasionally instead of babysitting charts.
-
-THE SETUP IT LOOKS FOR (pullback-in-trend):
-  1. Established uptrend (CALL):  EMA50 > EMA200  AND  price above EMA50
-     (or downtrend for PUT: EMA50 < EMA200 and price below EMA50)
-  2. A pullback just happened:    price recently dipped toward the EMA20
-  3. A reclaim/bounce:            today's candle closes back in the trend
-                                  direction (bullish bar in an uptrend)
-  4. Not overextended:            RSI not already extreme
-  5. Volume not dead:             today's volume >= its recent average
-
-When it fires, it suggests a CALL/PUT a few WEEKS out (slow theta) and a
-WIDE stop / target sized for a multi-day swing, NOT a scalp.
-
-IMPORTANT: place your stop AND target as a bracket/OCO order at your broker
-when you enter, so the trade exits on its own while you're at work.
-
->>> This is unvalidated until you run swing_backtest.py. Do that first. <<<
-"""
-
 from flask import Flask
 import os
 import requests
@@ -39,7 +15,7 @@ DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1504082995479314502/zDYRdyJ5
 WATCHLIST = ["BAC", "F", "SOFI", "HOOD"]
 
 # ---- Tunable settings (GUESSES until swing_backtest.py proves them) ----
-SCAN_INTERVAL_SECONDS = 3600     # check every hour (daily strategy; avoid rate limits)
+SCAN_INTERVAL_SECONDS = 600     # check every hour (daily strategy; avoid rate limits)
 TICKER_DELAY_SECONDS = 4         # pause between tickers so Yahoo doesn't throttle
 FETCH_RETRIES = 3                # retry a ticker if rate-limited
 RSI_BLOCK_HIGH = 72              # don't buy already-overbought
@@ -191,16 +167,20 @@ RSI: {rsi:.1f}   Volume vs 20d avg: {vol/avg_vol:.2f}x
 
 def scanner_loop():
     while True:
+        print("BOT LOOP RUNNING")
+
         if market_is_open():
             print("Scanning (swing / daily)...")
             for t in WATCHLIST:
                 scan_stock(t)
-                time.sleep(TICKER_DELAY_SECONDS)  # be gentle on Yahoo
+                time.sleep(TICKER_DELAY_SECONDS)
         else:
             print("Market closed - waiting...")
-        print(f"Sleeping {SCAN_INTERVAL_SECONDS}s...")
-        time.sleep(SCAN_INTERVAL_SECONDS)
 
+        print(f"Sleeping {SCAN_INTERVAL_SECONDS}s...")
+
+        for _ in range(SCAN_INTERVAL_SECONDS):
+            time.sleep(1)
 
 @app.route("/")
 def home():
